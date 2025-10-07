@@ -5,7 +5,14 @@ export interface TableSchema {
   createdAt: string;
   updatedAt: string;
   isDropped: boolean;
+  nextId: number;
+  withPK: boolean;
   columns: ColumnDefinition[];
+}
+export interface InsertionRecordsResponse {
+  data: ColumnValue[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TableRecord {

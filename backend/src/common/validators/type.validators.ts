@@ -54,6 +54,16 @@ export class TypeValidator {
     for (const column of columns) {
       const value = data[column.name];
 
+      if (value && column.isPrimaryKey && column.autoIncrement) {
+        errors.push(
+          `Insert statement should not include primary key autoIncrementing column '${column.name}'.`,
+        );
+        continue;
+      }
+      if (column.isPrimaryKey && column.autoIncrement) {
+        continue;
+      }
+
       if (
         (value === undefined || value === null) &&
         !column.nullable &&

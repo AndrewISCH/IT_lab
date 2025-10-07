@@ -12,6 +12,7 @@ import type {
   TableMetadata,
 } from '../common/types/table.interface';
 import { CreateColumnDto } from './dto/create-column.dto';
+import { DataType } from 'src/common/types/data-types.enum';
 
 @Injectable()
 export class TablesService {
@@ -48,7 +49,7 @@ export class TablesService {
 
     const columnsWithPosition = columns.map((col, index) => ({
       ...col,
-      position: col.position ?? index,
+      position: index,
       nullable: col.nullable ?? false,
     }));
 
@@ -323,6 +324,35 @@ export class TablesService {
   ): void {
     if (columns.length === 0) {
       throw new BadRequestException('Table must have at least one column');
+    }
+
+    const primaryKeys = columns.filter((col) => col.isPrimaryKey);
+    if (primaryKeys.length > 1) {
+      throw new BadRequestException('Table can have only one primary key');
+    }
+
+    if (
+      columns.some(
+        (column: ColumnDefinition | CreateColumnDto) =>
+          column.autoIncrement && !column.isPrimaryKey,
+      )
+    ) {
+      throw new BadRequestException(
+        'Only primary key values can be auto incremented',
+      );
+    }
+
+    if (
+      columns.some(
+        (column: ColumnDefinition | CreateColumnDto) =>
+          column.autoIncrement &&
+          column.type !== DataType.INTEGER &&
+          column.isPrimaryKey,
+      )
+    ) {
+      throw new BadRequestException(
+        'Only integer type can be primary key with auto increment',
+      );
     }
 
     const names = columns.map(

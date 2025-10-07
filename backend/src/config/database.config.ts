@@ -14,7 +14,6 @@ function ensureDatabasesDirectory() {
 
 export const getDatabaseConfig = (): TypeOrmModuleOptions => {
   ensureDatabasesDirectory();
-  console.log(process.cwd());
   return {
     type: 'sqlite',
     database: join(process.cwd(), 'databases', 'internal.db'),

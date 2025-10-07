@@ -7,6 +7,8 @@ export interface ColumnDefinition {
   nullable: boolean;
   defaultValue?: unknown;
   typeConfig?: TypeConfig;
+  isPrimaryKey?: boolean;
+  autoIncrement?: boolean;
 }
 
 export interface ColumnValue {

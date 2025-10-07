@@ -8,9 +8,11 @@ import { CommunityDbService } from '../storage/community-db.service';
 import { DatabasesService } from '../databases/databases.service';
 import { TablesService } from '../tables/tables.service';
 import { TypeValidator } from '../common/validators/type.validators';
-import { randomUUID as uuid } from 'crypto';
 
-import type { TableRecord } from '../common/types/table.interface';
+import type {
+  InsertionRecordsResponse,
+  TableRecord,
+} from '../common/types/table.interface';
 
 @Injectable()
 export class RecordsService {
@@ -24,8 +26,8 @@ export class RecordsService {
     databaseId: string,
     userId: string,
     tableName: string,
-    data: Record<string, unknown>,
-  ): Promise<TableRecord> {
+    data: Record<string, unknown>[],
+  ): Promise<InsertionRecordsResponse> {
     const canEdit = await this.databasesService.canEditData(databaseId, userId);
     if (!canEdit) {
       throw new ForbiddenException('You do not have permission to edit data');
@@ -44,31 +46,36 @@ export class RecordsService {
       userId,
       tableName,
     );
-
-    const dataWithDefaults = TypeValidator.applyDefaults(data, schema.columns);
-
-    const validation = TypeValidator.validateRecord(
-      dataWithDefaults,
-      schema.columns,
-    );
-    if (!validation.valid) {
+    if (data.length === 0) {
       throw new BadRequestException({
-        message: 'Validation failed',
-        errors: validation.errors,
+        message: 'Data must be non empty',
       });
     }
+    const parsedData = data.map((row) => {
+      const rowWithDefaults = TypeValidator.applyDefaults(row, schema.columns);
 
-    const recordId = uuid();
-    await this.communityDbService.insertRecord(
+      const validation = TypeValidator.validateRecord(
+        rowWithDefaults,
+        schema.columns,
+      );
+
+      if (!validation.valid) {
+        throw new BadRequestException({
+          message: 'Validation failed',
+          errors: validation.errors,
+        });
+      }
+      return rowWithDefaults;
+    });
+
+    await this.communityDbService.insertRecords(
       databaseId,
       tableName,
-      recordId,
-      dataWithDefaults,
+      parsedData,
+      schema,
     );
-
     return {
-      id: recordId,
-      data: dataWithDefaults,
+      data: parsedData,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

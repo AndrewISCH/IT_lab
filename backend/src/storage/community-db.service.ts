@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { getCommunityDbPath } from '../config/database.config';
 import type { ColumnDefinition } from '../common/types/column.interface';
@@ -9,7 +14,16 @@ type DbTableRow = {
   name: string;
   created_at: string;
   updated_at: string;
+  next_id: number;
+  with_pk: boolean;
   is_dropped: number;
+};
+
+type QueryParamConfig = {
+  withPK: boolean;
+  PK_key: string | undefined;
+  isAutoIncrement: boolean;
+  incrementedId: number;
 };
 
 type DbColumnRow = {
@@ -19,6 +33,8 @@ type DbColumnRow = {
   position: number;
   data_type: string;
   nullable: number;
+  auto_increment: boolean;
+  is_primary_key: boolean;
   default_value: string | null;
   type_config: string | null;
 };
@@ -54,6 +70,35 @@ export class CommunityDbService implements OnModuleDestroy {
       clearTimeout(conn.cleanupTimeout);
       conn.cleanupTimeout = this.scheduleCleanup(databaseId);
     }
+  }
+
+  private getInsertQueryParams(
+    row: Record<string, unknown>,
+    { withPK, PK_key, isAutoIncrement, incrementedId }: QueryParamConfig,
+  ) {
+    const id =
+      withPK && !isAutoIncrement && PK_key ? row[PK_key] : incrementedId;
+    const adjustedColumn = withPK && isAutoIncrement && PK_key;
+    // manually adding column with autoincrementing pk for row object
+    if (adjustedColumn) {
+      Object.assign(row, { [PK_key]: id });
+    }
+
+    const now = new Date().toISOString();
+    const columns = [
+      '__id__',
+      '__created_at__',
+      '__updated_at__',
+      ...Object.keys(row),
+    ];
+    const values = [id, now, now, ...Object.values(row)];
+    const placeholders = columns.map(() => '?').join(', ');
+
+    return {
+      values,
+      placeholders,
+      columns,
+    };
   }
 
   async getConnection(databaseId: string): Promise<DataSource> {
@@ -107,6 +152,8 @@ export class CommunityDbService implements OnModuleDestroy {
         name TEXT PRIMARY KEY,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        next_id INTEGER DEFAULT 0,
+        with_pk INTEGER DEFAULT 0,
         is_dropped INTEGER DEFAULT 0
       )
     `);
@@ -119,6 +166,8 @@ export class CommunityDbService implements OnModuleDestroy {
         position INTEGER NOT NULL,
         data_type TEXT NOT NULL,
         nullable INTEGER NOT NULL,
+        is_primary_key INTEGER,
+        auto_increment INTEGER,
         default_value TEXT,
         type_config TEXT,
         FOREIGN KEY (table_name) REFERENCES __tables__(name),
@@ -138,15 +187,18 @@ export class CommunityDbService implements OnModuleDestroy {
     const now = new Date().toISOString();
 
     await connection.transaction(async (manager) => {
+      const withPK = columns.some(
+        (column: ColumnDefinition) => column.isPrimaryKey ?? false,
+      );
       await manager.query(
-        `INSERT INTO __tables__ (name, created_at, updated_at, is_dropped) VALUES (?, ?, ?, 0)`,
-        [tableName, now, now],
+        `INSERT INTO __tables__ (name, created_at, updated_at, with_pk, next_id, is_dropped) VALUES (?, ?, ?, ?, 0, 0)`,
+        [tableName, now, now, withPK],
       );
 
       for (const column of columns) {
         await manager.query(
-          `INSERT INTO __columns__ (id, table_name, column_name, position, data_type, nullable, default_value, type_config)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO __columns__ (id, table_name, column_name, position, data_type, nullable, default_value, type_config, is_primary_key, auto_increment)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             `${tableName}_${column.name}`,
             tableName,
@@ -156,6 +208,8 @@ export class CommunityDbService implements OnModuleDestroy {
             column.nullable ? 1 : 0,
             column.defaultValue ? JSON.stringify(column.defaultValue) : null,
             column.typeConfig ? JSON.stringify(column.typeConfig) : null,
+            column.isPrimaryKey ? 1 : 0,
+            column.autoIncrement ? 1 : 0,
           ],
         );
       }
@@ -237,6 +291,8 @@ export class CommunityDbService implements OnModuleDestroy {
       position: row.position,
       type: row.data_type as DataType,
       nullable: row.nullable === 1,
+      isPrimaryKey: row.is_primary_key,
+      autoIncrement: row.auto_increment,
       defaultValue: row.default_value
         ? (JSON.parse(row.default_value) as unknown)
         : undefined,
@@ -250,6 +306,8 @@ export class CommunityDbService implements OnModuleDestroy {
       createdAt: tableData.created_at,
       updatedAt: tableData.updated_at,
       isDropped: tableData.is_dropped === 1,
+      nextId: tableData.next_id,
+      withPK: tableData.with_pk,
       columns,
     };
   }
@@ -302,29 +360,49 @@ export class CommunityDbService implements OnModuleDestroy {
     };
   }
 
-  async insertRecord(
+  async insertRecords(
     databaseId: string,
     tableName: string,
-    id: string,
-    data: Record<string, unknown>,
+    rows: Record<string, unknown>[],
+    schema: TableSchema,
   ): Promise<void> {
     const connection = await this.getConnection(databaseId);
-    const now = new Date().toISOString();
+    const withPK = schema.withPK;
+    const PK_key = schema.columns.find((column) => column.isPrimaryKey)?.name;
+    const isAutoIncrement =
+      withPK && schema.columns.some((column) => column.autoIncrement);
+    const updatedNextID = schema.nextId + rows.length;
+    try {
+      await connection.transaction(async (manager) => {
+        const insertPromises = rows.map((row, ind) => {
+          const { columns, values, placeholders } = this.getInsertQueryParams(
+            row,
+            {
+              withPK,
+              PK_key,
+              isAutoIncrement,
+              incrementedId: schema.nextId + ind,
+            },
+          );
 
-    const columns = [
-      '__id__',
-      '__created_at__',
-      '__updated_at__',
-      ...Object.keys(data),
-    ];
-    const values = [id, now, now, ...Object.values(data)];
-    const placeholders = columns.map(() => '?').join(', ');
+          return manager.query(
+            `INSERT INTO "${tableName}" (${columns.map((c) => `"${c}"`).join(', ')})
+         VALUES (${placeholders})`,
+            values,
+          );
+        });
 
-    await connection.query(
-      `INSERT INTO "${tableName}" (${columns.map((c) => `"${c}"`).join(', ')})
-       VALUES (${placeholders})`,
-      values,
-    );
+        await Promise.all(insertPromises);
+        if (isAutoIncrement) {
+          await manager.query(
+            `UPDATE __tables__ SET  next_id = ?, updated_at = ? WHERE name = ?`,
+            [updatedNextID, new Date().toISOString(), tableName],
+          );
+        }
+      });
+    } catch (err) {
+      throw new BadRequestException(`Error during executing SQL query: ${err}`);
+    }
   }
 
   async updateRecord(

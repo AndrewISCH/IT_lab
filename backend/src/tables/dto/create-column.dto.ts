@@ -50,9 +50,12 @@ export class CreateColumnDto {
   defaultValue?: unknown;
 
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  position?: number;
+  @IsBoolean()
+  isPrimaryKey?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  autoIncrement?: boolean;
 
   @IsOptional()
   @ValidateIf(

@@ -1,7 +1,7 @@
-import { IsObject, IsNotEmpty } from 'class-validator';
+import { IsArray, IsNotEmpty } from 'class-validator';
 
 export class CreateRecordDto {
-  @IsObject()
+  @IsArray()
   @IsNotEmpty()
-  data: Record<string, unknown>;
+  data: Record<string, unknown>[];
 }
