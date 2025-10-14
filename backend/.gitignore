@@ -3,6 +3,7 @@
 /node_modules
 /build
 
+databases/*
 # Logs
 logs
 *.log

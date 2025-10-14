@@ -64,6 +64,15 @@ export class CreateColumnDto {
       o.type === DataType.STRING_CHAR_INTERVAL,
   )
   @ValidateNested()
-  @Type(() => Object)
+  @Type((opts) => {
+    const obj = opts?.object as CreateColumnDto;
+    if (obj.type === DataType.CHAR_INTERVAL) {
+      return CharIntervalConfigDto;
+    }
+    if (obj.type === DataType.STRING_CHAR_INTERVAL) {
+      return StringCharIntervalConfigDto;
+    }
+    return Object;
+  })
   typeConfig?: CharIntervalConfigDto | StringCharIntervalConfigDto;
 }

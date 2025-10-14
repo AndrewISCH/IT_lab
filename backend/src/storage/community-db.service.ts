@@ -19,11 +19,17 @@ type DbTableRow = {
   is_dropped: number;
 };
 
-type QueryParamConfig = {
+type InsertQueryParamConfig = {
   withPK: boolean;
   PK_key: string | undefined;
   isAutoIncrement: boolean;
   incrementedId: number;
+};
+
+type UpdateQueryParamConfig = {
+  withPK: boolean;
+  PK_key: string | undefined;
+  isAutoIncrement: boolean;
 };
 
 type DbColumnRow = {
@@ -74,7 +80,7 @@ export class CommunityDbService implements OnModuleDestroy {
 
   private getInsertQueryParams(
     row: Record<string, unknown>,
-    { withPK, PK_key, isAutoIncrement, incrementedId }: QueryParamConfig,
+    { withPK, PK_key, isAutoIncrement, incrementedId }: InsertQueryParamConfig,
   ) {
     const id =
       withPK && !isAutoIncrement && PK_key ? row[PK_key] : incrementedId;
@@ -97,6 +103,27 @@ export class CommunityDbService implements OnModuleDestroy {
     return {
       values,
       placeholders,
+      columns,
+    };
+  }
+
+  private getUpdateRowQueryParams(
+    row: Record<string, unknown>,
+    { withPK, PK_key, isAutoIncrement }: UpdateQueryParamConfig,
+  ) {
+    const id = withPK && !isAutoIncrement && PK_key && row[PK_key];
+    const adjustedColumn = withPK && !isAutoIncrement && PK_key;
+    // manually adding column with __id__ column if PK is not auto incrementing
+    // so we assume that changed PK is unique
+    if (adjustedColumn) {
+      Object.assign(row, { ['__id__']: id });
+    }
+    const columns = [...Object.keys(row)];
+    const values = [...Object.values(row)];
+
+    return {
+      newId: String(id),
+      values,
       columns,
     };
   }
@@ -408,22 +435,31 @@ export class CommunityDbService implements OnModuleDestroy {
   async updateRecord(
     databaseId: string,
     tableName: string,
+    schema: TableSchema,
     id: string,
     data: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<string> {
     const connection = await this.getConnection(databaseId);
     const now = new Date().toISOString();
+    const withPK = schema.withPK;
+    const PK_key = schema.columns.find((column) => column.isPrimaryKey)?.name;
+    const isAutoIncrement =
+      withPK && schema.columns.some((column) => column.autoIncrement);
 
-    const setClauses = Object.keys(data)
-      .map((key) => `"${key}" = ?`)
-      .join(', ');
+    const { values, columns, newId } = this.getUpdateRowQueryParams(data, {
+      withPK,
+      PK_key,
+      isAutoIncrement,
+    });
+    const setClauses = columns.map((key) => `"${key}" = ?`).join(', ');
 
     await connection.query(
       `UPDATE "${tableName}"
        SET ${setClauses}, __updated_at__ = ?
        WHERE __id__ = ?`,
-      [...Object.values(data), now, id],
+      [...values, now, id],
     );
+    return newId ?? id;
   }
 
   async deleteRecord(
@@ -439,10 +475,11 @@ export class CommunityDbService implements OnModuleDestroy {
     const connection = await this.getConnection(databaseId);
 
     await connection.transaction(async (manager) => {
-      await manager.query(
-        `UPDATE __tables__ SET is_dropped = 1, updated_at = ? WHERE name = ?`,
-        [new Date().toISOString(), tableName],
-      );
+      await manager.query(`DELETE FROM __columns__ WHERE table_name = ?`, [
+        tableName,
+      ]);
+
+      await manager.query(`DELETE FROM __tables__ WHERE name = ?`, [tableName]);
 
       await manager.query(`DROP TABLE IF EXISTS "${tableName}"`);
     });
@@ -464,7 +501,13 @@ export class CommunityDbService implements OnModuleDestroy {
         [newName, `${tableName}_${newName}`, tableName, oldName],
       );
 
-      await this.recreateTableWithNewSchema(manager, databaseId, tableName);
+      await this.recreateTableWithNewSchema(
+        manager,
+        databaseId,
+        tableName,
+        oldName,
+        newName,
+      );
     });
 
     this.logger.log(
@@ -507,15 +550,33 @@ export class CommunityDbService implements OnModuleDestroy {
     }
   }
 
+  private renameRecords = (
+    records: TableRecord[],
+    oldName: string,
+    newName: string,
+  ): TableRecord[] => {
+    return records.map((record) => ({
+      ...record,
+      data: Object.fromEntries(
+        Object.entries(record.data).map(([columnName, value]) => [
+          columnName === oldName ? newName : columnName,
+          value,
+        ]),
+      ),
+    }));
+  };
+
   private async recreateTableWithNewSchema(
     manager: EntityManager,
     databaseId: string,
     tableName: string,
+    oldName: string,
+    newName: string,
   ): Promise<void> {
     const schema = await this.loadTableSchema(databaseId, tableName);
     const records = await this.loadTableRecords(databaseId, tableName);
-
-    const tempTableName = `${tableName}_temp`;
+    const renamedRecords = this.renameRecords(records, oldName, newName);
+    const tempTableName = `__${tableName}_temp`;
     const columnDefs = schema.columns
       .map((col) => `"${col.name}" ${this.getSqlType(col.type)}`)
       .join(', ');
@@ -529,7 +590,7 @@ export class CommunityDbService implements OnModuleDestroy {
       )
     `);
 
-    for (const record of records) {
+    for (const record of renamedRecords) {
       const columns = [
         '__id__',
         '__created_at__',

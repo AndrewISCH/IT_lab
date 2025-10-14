@@ -17,6 +17,8 @@ import {
   canEditData,
   canManagePermissions,
 } from '../common/types/database-role.enum';
+import { getCommunityDbPath } from 'src/config/database.config';
+import fs from 'fs';
 
 @Injectable()
 export class DatabasesService {
@@ -65,7 +67,12 @@ export class DatabasesService {
       relations: ['database'],
     });
 
-    return permissions.map((p) => p.database);
+    return permissions
+      .map((p) => p.database)
+      .sort(
+        (a, b) =>
+          new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(),
+      );
   }
 
   async findById(databaseId: string): Promise<Database> {
@@ -137,9 +144,12 @@ export class DatabasesService {
 
     await this.communityDbService.closeConnection(databaseId);
 
-    // TODO: Видалити файл БД (опціонально, можна залишити для backup)
-    // const dbPath = getCommunityDbPath(databaseId);
-    // await fs.unlink(dbPath);
+    const dbPath = getCommunityDbPath(databaseId);
+    fs.unlink(dbPath, (err) => {
+      if (err) {
+        console.error(err.message);
+      }
+    });
   }
 
   async grantPermission(

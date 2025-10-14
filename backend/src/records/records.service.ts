@@ -186,6 +186,10 @@ export class RecordsService {
         throw new BadRequestException(`Unknown column: '${key}'`);
       }
 
+      if (column.isPrimaryKey && column.autoIncrement) {
+        throw new BadRequestException(`Column: '${key}' cannot be modified!`);
+      }
+
       if (!TypeValidator.validate(value, column)) {
         throw new BadRequestException({
           message: 'Validation failed',
@@ -195,15 +199,16 @@ export class RecordsService {
 
       partialValidation[key] = value;
     }
-
-    await this.communityDbService.updateRecord(
+    // if we change id value, we should select row with new id instead of an old one
+    const recordNewId = await this.communityDbService.updateRecord(
       databaseId,
       tableName,
+      schema,
       recordId,
       partialValidation,
     );
 
-    return await this.findOne(databaseId, userId, tableName, recordId);
+    return await this.findOne(databaseId, userId, tableName, recordNewId);
   }
 
   async remove(
