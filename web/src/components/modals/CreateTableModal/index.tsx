@@ -6,6 +6,8 @@ import {
 } from "../../../api/types";
 import type {UseMutateAsyncFunction} from "@tanstack/react-query";
 import "../styles.css";
+import {useErrorMessageTrigger} from "../../../store/useErrorMessage";
+import {getErrorMessage} from "../../../utils/error";
 
 interface CreateTableModalProps {
   isOpen: boolean;
@@ -35,6 +37,7 @@ export const CreateTableModal = ({
   isLoading,
 }: CreateTableModalProps) => {
   const [tableName, setTableName] = useState("");
+  const errorTrigger = useErrorMessageTrigger();
   const [columns, setColumns] = useState<ColumnForm[]>([
     {
       name: "",
@@ -99,19 +102,19 @@ export const CreateTableModal = ({
     e.preventDefault();
 
     if (columns.some((col) => !col.name.trim())) {
-      alert("Всі колонки повинні мати назву");
+      errorTrigger("Всі колонки повинні мати назву");
       return;
     }
 
     const names = columns.map((c) => c.name.trim());
     if (new Set(names).size !== names.length) {
-      alert("Назви колонок повинні бути унікальними");
+      errorTrigger("Назви колонок повинні бути унікальними");
       return;
     }
 
     const pkCount = columns.filter((c) => c.isPrimaryKey).length;
     if (pkCount > 1) {
-      alert("Тільки одна колонка може бути Primary Key");
+      errorTrigger("Тільки одна колонка може бути Primary Key");
       return;
     }
 
@@ -120,7 +123,7 @@ export const CreateTableModal = ({
         c.autoIncrement && (!c.isPrimaryKey || c.type !== DataType.INTEGER),
     );
     if (invalidAutoIncrement) {
-      alert("Auto-increment можливий тільки для INTEGER Primary Key");
+      errorTrigger("Auto-increment можливий тільки для INTEGER Primary Key");
       return;
     }
 
@@ -135,11 +138,17 @@ export const CreateTableModal = ({
 
       if (col.type === DataType.CHAR_INTERVAL) {
         if (!col.charStart || !col.charEnd) {
-          alert(
+          errorTrigger(
             `Колонка "${col.name}": вкажіть start та end для Char Interval`,
           );
           throw new Error("Invalid charInvl config");
+        } else if (col.charStart.charCodeAt(0) > col.charEnd.charCodeAt(0)) {
+          errorTrigger(
+            `UTF-8 код start повинен бути менший за end для Char Interval`,
+          );
+          throw new Error("Invalid charInvl config");
         }
+
         dto.typeConfig = {
           start: col.charStart,
           end: col.charEnd,
@@ -147,9 +156,32 @@ export const CreateTableModal = ({
       }
 
       if (col.type === DataType.STRING_CHAR_INTERVAL) {
+        console.log(
+          col.stringCharStart.charCodeAt(0),
+          col.stringCharEnd.charCodeAt(0),
+          col.stringCharStart,
+          col.stringCharEnd,
+        );
         if (!col.stringCharStart || !col.stringCharEnd) {
-          alert(
+          errorTrigger(
             `Колонка "${col.name}": вкажіть інтервал символів для String Char Interval`,
+          );
+          throw new Error("Invalid stringCharInvl config");
+        } else if (
+          col.stringCharStart.charCodeAt(0) > col.stringCharEnd.charCodeAt(0)
+        ) {
+          errorTrigger(
+            `UTF-8 код start повинен бути менший за end для String Char Interval`,
+          );
+          throw new Error("Invalid stringCharInvl config");
+        } else if (parseInt(col.maxLength, 10) < 1) {
+          errorTrigger(
+            `Максимальний розмір stringChatInvl не може бути менший за 1!`,
+          );
+          throw new Error("Invalid stringCharInvl config");
+        } else if (parseInt(col.maxLength, 10) < parseInt(col.minLength, 10)) {
+          errorTrigger(
+            `Максимальний розмір stringChatInvl не може бути менший за мінімальний!`,
           );
           throw new Error("Invalid stringCharInvl config");
         }
@@ -190,7 +222,7 @@ export const CreateTableModal = ({
       ]);
       onClose();
     } catch (error) {
-      console.error("Error creating table:", error);
+      errorTrigger(`Error creating table: ${getErrorMessage(error)}`);
     }
   };
 

@@ -50,7 +50,6 @@ const DatabasesPage = () => {
 
       {!databases || databases.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">📊</div>
           <h3>У вас ще немає баз даних</h3>
           <p>Створіть першу базу даних для початку роботи</p>
           <button

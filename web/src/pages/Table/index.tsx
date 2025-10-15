@@ -100,7 +100,6 @@ const TablePage = () => {
 
       {!records || records.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-icon">📝</div>
           <h3>У цій таблиці ще немає записів</h3>
           <p>Додайте перший запис для початку роботи</p>
           <button

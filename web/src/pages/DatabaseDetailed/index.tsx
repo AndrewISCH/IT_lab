@@ -105,7 +105,6 @@ const DatabaseDetailPage = () => {
 
         {!tables || tables.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">📋</div>
             <h3>У цій базі даних ще немає таблиць</h3>
             <p>Створіть першу таблицю для збереження даних</p>
             {canEdit && (
